@@ -1,19 +1,62 @@
-const express = require('express');
-const axios = require('axios');
+const fetch = require('node-fetch');
 const fs = require('fs');
-const { v4: uuidv4 } = require('uuid');
 
-const app = express();
-const port = 3000;
-
-app.use(express.json());
-
-const generateRandomString = (length) => {
+function generateRandomString(length) {
     const characters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    return Array.from({ length }, () => characters[Math.floor(Math.random() * characters.length)]).join('');
-};
+    let randomString = '';
+    for (let i = 0; i < length; i++) {
+        randomString += characters.charAt(Math.floor(Math.random() * characters.length));
+    }
+    return randomString;
+}
 
-const sendRequest = async () => {
+function getCurrentDateTime() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hour = String(now.getHours()).padStart(2, '0');
+    const minute = String(now.getMinutes()).padStart(2, '0');
+    const second = String(now.getSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day} | ${hour}:${minute}:${second}`;
+}
+
+async function sendRequest(url, headers, data) {
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify(data)
+        });
+
+        if (response.ok) {
+            const responseData = await response.json();
+            const token = responseData.token;
+            const timestamp = getCurrentDateTime();
+            fs.appendFileSync('Promo.txt', `https://discord.com/billing/partner-promotions/1180231712274387115/${token}\n`);
+            console.log(`${timestamp} - Nitro Promo Saved To Promo.txt`);
+        } else {
+            const error = new Error(response.statusText);
+            error.response = response;
+            throw error;
+        }
+
+        return true;
+    } catch (error) {
+        console.error(`An error occurred: ${error}`);
+        if (error.response && error.response.status === 429) {
+            const resetTime = error.response.headers.get('retry-after') || 60;
+            console.log(`Hey Slow You Were Over the Speed ​​Limit, Waiting for ${resetTime} Seconds to Allow Waiting Time to Expire ⌚`);
+            await new Promise(resolve => setTimeout(resolve, resetTime * 1000));
+        } else {
+            console.log(`Will Try Again in 5 Seconds ⌚`);
+            await new Promise(resolve => setTimeout(resolve, 5000));
+        }
+        return false;
+    }
+}
+
+async function sendRequests() {
     const url = 'https://api.discord.gx.games/v1/direct-fulfillment';
     const headers = {
         'authority': 'api.discord.gx.games',
@@ -31,33 +74,24 @@ const sendRequest = async () => {
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 OPR/105.0.0.0'
     };
 
-    const data = {
-        'partnerUserId': generateRandomString(64)
-    };
-
     try {
-        const response = await axios.post(url, data, { headers });
+        while (true) {
+            const data = {
+                'partnerUserId': generateRandomString(64)
+            };
 
-        if (response.status === 200) {
-            const token = response.data.token;
-            fs.appendFileSync('codes.txt', `https://discord.com/billing/partner-promotions/1180231712274387115/${token}\n`);
-            console.log('Token saved to codes.txt file.');
-            console.log(`Generated token: https://discord.com/billing/partner-promotions/1180231712274387115/${token}`);
-        } else if (response.status === 429) {
-            console.log('Rate limit exceeded! Waiting one minute to allow for cooldown.');
-        } else if (response.status === 504) {
-            console.log('Server timed out! Trying again in 5 seconds.');
-        } else {
-            console.log(`Request failed with status code ${response.status}.`);
-            console.log(`Error message: ${response.data}`);
+            await sendRequest(url, headers, data);
+            await new Promise(resolve => setTimeout(resolve, 1000));
         }
     } catch (error) {
-        console.error(`An error occurred: ${error.message}`);
+        console.log('Received SIGINT. Exiting gracefully.');
+        process.exit(0);
     }
-};
+}
 
-setInterval(sendRequest, 1); // Send a request every second
-
-app.listen(port, () => {
-    console.log(`Server is running at http://localhost:${port}`);
+process.on('SIGINT', () => {
+    console.log('Received SIGINT. Exiting gracefully.');
+    process.exit(0);
 });
+
+sendRequests();
